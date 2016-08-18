@@ -18,29 +18,91 @@ function table(context) {
   return context.params.table.replace(/[^a-zA-Z_\-]/g, '');
 }
 
+const IGNORED_QUERIES = ['fields', 'order', 'limit', 'offset'];
+
+function applySelect(query, ctx) {
+  if (ctx.query.fields) {
+    return query.select(ctx.query.fields.split(','));
+  } else if (ctx._meta.fields) {
+    return query.select(ctx._meta.fields.split(','));
+  } else {
+    return query.select('*');
+  }
+}
+
 function queryFromSimpleParams(query, params) {
   _.each(params, function(value, key) {
-    query = query.where(key, 'ILIKE', value);
+    if (_.includes(IGNORED_QUERIES, key)) return;
+
+    if (value.match(/^\-?[0-9.\-Ee]+$/))
+      query = query.where(key, '=', Number(value));
+    else
+      query = query.where(key, 'ILIKE', value);
   });
 
   return query;
 }
 
+function applyWindow(query, ctx) {
+  if (ctx.query.limit) {
+    query = query.limit(Number(ctx.query.limit));
+    ctx.resteasy.windowed = true;
+  }
+
+  if (ctx.query.offset) {
+    query = query.offset(Number(ctx.query.offset));
+    ctx.resteasy.windowed = true;
+  }
+
+  return query;
+}
+
+function applyOrder(query, ctx) {
+  var order = ctx.query.order;
+  if (order) {
+    _.each(order.split(','), function(piece) {
+      var m = piece.match(/^([+-]?)(.*?)$/);
+      if (!m) return;
+
+      var direction = ((m[1] == '-') ? 'desc' : 'asc');
+      var column = m[2];
+
+      query = query.orderBy(column, direction);
+    });
+  }
+
+  return query;
+}
+
+function count(query, ctx) {
+  return query.count('*');
+}
+
 // prepare the environment
 router.use(function *(next) {
   this.knex = knex;
+  this.resteasy = {};
   this.table = table(this);
 
   yield next;
 });
 
 function *index(next) {
-  var query = this.knex(this.table).select('*');
+  var query = this.knex(this.table);
 
   query = queryFromSimpleParams(query, this.query);
 
+  if (this.query.limit || this.query.offset)
+    this.resteasy.count = (yield count(query.clone(), this))[0].count;
+
+  query = applyOrder(query, this);
+  query = applyWindow(query, this);
+  query = applySelect(query, this);
+
+  sql = query.toSQL();
   res = yield query;
-  this.body = { rows: res };
+
+  this.body = { rows: res, query: sql.sql, bindings: sql.bindings, count: this.resteasy.count };
 }
 
 function *create(next) {
@@ -51,7 +113,11 @@ function *create(next) {
 }
 
 function *read(next) {
-  var result = yield this.knex(this.params.table).select('*').where('users.id', this.params.id);
+  var query = this.knex(this.params.table).where('users.id', this.params.id);
+
+  query = select(query, this);
+
+  var result = yield;
 
   this.body = { rows: result };
 }
