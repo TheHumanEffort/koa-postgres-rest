@@ -1,0 +1,43 @@
+app:
+  build: .
+  links:
+    - postgres
+  volumes:
+    - ./src:/application/src
+    - ./db:/application/db
+  ports:
+    - '8082:8082'
+  command: npm run dev
+  environment:
+    - PORT=8082
+    - DATABASE_NAME=koa-rest
+    - DATABASE_URL=postgres://pguser:c157fc70d5da2256fa89a488c5c5916e0c9461f@postgres/koa-rest-development
+postgres:
+  image: postgres:9.5
+  environment:
+    - POSTGRES_USER=pguser
+    - POSTGRES_PASSWORD=c157fc70d5da2256fa89a488c5c5916e0c9461f
+pgadmin:
+  image: postgres:9.5
+  environment:
+    - PGUSER=pguser
+    - PGPASSWORD=c157fc70d5da2256fa89a488c5c5916e0c9461f
+    - PGHOST=postgres
+  command: bash
+  links:
+    - postgres
+liquibase:
+  image: thehumaneffort/pg-liquibase-update
+  links:
+    - postgres:db
+  volumes:
+    - ./db/changelog:/changelogs
+  command: /scripts/update.sh
+  environment:
+    - MAX_TRIES=1
+    - POSTGRES_USER=pguser
+    - POSTGRES_PASSWORD=c157fc70d5da2256fa89a488c5c5916e0c9461f
+    - POSTGRES_DB=koa-rest-development
+    - POSTGRES_HOST=db
+    - POSTGRES_PORT=5432
+    - CHANGELOG_FILE=db.changelog-master.xml
